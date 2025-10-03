@@ -2,14 +2,14 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { generatePdf } from '../services/pdfService';
 import { getCrossStitchInstructions } from '../services/geminiService';
 import Spinner from './Spinner';
-import { DownloadIcon, CircleIcon, SquareIcon } from './Icons';
+import { DownloadIcon, SolidCircleIcon, HollowCircleIcon, SolidSquareIcon, HollowSquareIcon, CrossStitchIcon, HalfStitchForwardIcon, HalfStitchBackwardIcon } from './Icons';
 import { DmcColor } from '../types';
 
 interface EditorScreenProps {
   imageFile: File;
 }
 
-type FillShape = 'circle' | 'square';
+type StitchType = 'circle' | 'square' | 'hollow-circle' | 'hollow-square' | 'cross-stitch' | 'half-stitch-forward' | 'half-stitch-backward';
 
 const DMC_COLORS: DmcColor[] = [
   { name: 'Red', dmc: '#321', hex: '#DE313A' },
@@ -23,12 +23,13 @@ const DMC_COLORS: DmcColor[] = [
 const EditorScreen: React.FC<EditorScreenProps> = ({ imageFile }) => {
   const [gridSize, setGridSize] = useState(32);
   const [threshold, setThreshold] = useState(128);
-  const [fillShape, setFillShape] = useState<FillShape>('circle');
-  const [outlineOffset, setOutlineOffset] = useState(5);
+  const [stitchType, setStitchType] = useState<StitchType>('circle');
+  const [shapeSize, setShapeSize] = useState(50);
   const [selectedColor, setSelectedColor] = useState(DMC_COLORS[5]); // Default to black
   const [loading, setLoading] = useState(true);
   const [loadingMessage, setLoadingMessage] = useState('Preparing image...');
   const [isImageLoaded, setIsImageLoaded] = useState(false);
+  const [stitchGrid, setStitchGrid] = useState<boolean[][] | null>(null);
   const patternCanvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLImageElement>(new Image());
 
@@ -37,13 +38,44 @@ const EditorScreen: React.FC<EditorScreenProps> = ({ imageFile }) => {
     setLoadingMessage('Generating pattern...');
     
     requestAnimationFrame(() => {
+      const stitchesX = currentGridSize;
+      const aspectRatio = image.width / image.height;
+      const stitchesY = Math.floor(currentGridSize / aspectRatio);
+      
+      const smallCanvas = document.createElement('canvas');
+      smallCanvas.width = stitchesX;
+      smallCanvas.height = stitchesY;
+      const smallCtx = smallCanvas.getContext('2d', { willReadFrequently: true });
+      if (!smallCtx) return;
+
+      smallCtx.imageSmoothingEnabled = true;
+      smallCtx.imageSmoothingQuality = 'high';
+      smallCtx.drawImage(image, 0, 0, stitchesX, stitchesY);
+
+      const imageData = smallCtx.getImageData(0, 0, stitchesX, stitchesY).data;
+      
+      const currentStitchGrid: boolean[][] = Array.from({ length: stitchesY }, () => Array(stitchesX).fill(false));
+      for (let y = 0; y < stitchesY; y++) {
+        for (let x = 0; x < stitchesX; x++) {
+          const i = (y * stitchesX + x) * 4;
+          const r = imageData[i];
+          const g = imageData[i + 1];
+          const b = imageData[i + 2];
+          const a = imageData[i + 3];
+          const gray = r * 0.299 + g * 0.587 + b * 0.114;
+          if (a > 128 && gray < currentThreshold) {
+            currentStitchGrid[y][x] = true;
+          }
+        }
+      }
+      setStitchGrid(currentStitchGrid);
+
       const canvas = patternCanvasRef.current;
       if (!canvas) {
         setLoading(false);
         return;
       }
 
-      const aspectRatio = image.width / image.height;
       const container = canvas.parentElement;
       if (!container) return;
 
@@ -64,134 +96,76 @@ const EditorScreen: React.FC<EditorScreenProps> = ({ imageFile }) => {
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
       
-      const stitchesX = currentGridSize;
-      const stitchesY = Math.floor(currentGridSize / aspectRatio);
-      
-      const smallCanvas = document.createElement('canvas');
-      smallCanvas.width = stitchesX;
-      smallCanvas.height = stitchesY;
-      const smallCtx = smallCanvas.getContext('2d', { willReadFrequently: true });
-      if (!smallCtx) return;
-
-      smallCtx.imageSmoothingEnabled = true;
-      smallCtx.imageSmoothingQuality = 'high';
-      smallCtx.drawImage(image, 0, 0, stitchesX, stitchesY);
-
-      const imageData = smallCtx.getImageData(0, 0, stitchesX, stitchesY).data;
-      
-      const stitchGrid: boolean[][] = Array.from({ length: stitchesY }, () => Array(stitchesX).fill(false));
-      for (let y = 0; y < stitchesY; y++) {
-        for (let x = 0; x < stitchesX; x++) {
-          const i = (y * stitchesX + x) * 4;
-          const r = imageData[i];
-          const g = imageData[i + 1];
-          const b = imageData[i + 2];
-          const a = imageData[i + 3];
-          const gray = r * 0.299 + g * 0.587 + b * 0.114;
-          if (a > 128 && gray < currentThreshold) {
-            stitchGrid[y][x] = true;
-          }
-        }
-      }
-      
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       const stitchWidth = canvas.width / stitchesX;
       const stitchHeight = canvas.height / stitchesY;
       const stitchSize = Math.min(stitchWidth, stitchHeight);
-      const circleRadius = stitchSize / 3.0;
-      const squareSize = stitchSize * 2 / 3.0;
-
-      if (outlineOffset > 0) {
-        // Flood-fill from edges to find exterior space
-        const backgroundGrid = Array.from({ length: stitchesY }, () => Array(stitchesX).fill(false));
-        const queue: [number, number][] = [];
-
-        for (let y = 0; y < stitchesY; y++) {
-          if (!stitchGrid[y][0]) { backgroundGrid[y][0] = true; queue.push([y, 0]); }
-          if (!stitchGrid[y][stitchesX - 1]) { backgroundGrid[y][stitchesX - 1] = true; queue.push([y, stitchesX - 1]); }
-        }
-        for (let x = 0; x < stitchesX; x++) {
-          if (!stitchGrid[0][x]) { backgroundGrid[0][x] = true; queue.push([0, x]); }
-          if (!stitchGrid[stitchesY - 1][x]) { backgroundGrid[stitchesY - 1][x] = true; queue.push([stitchesY - 1, x]); }
-        }
-
-        while (queue.length > 0) {
-          const [y, x] = queue.shift()!;
-          const neighbors = [[y - 1, x], [y + 1, x], [y, x - 1], [y, x + 1]];
-          for (const [ny, nx] of neighbors) {
-            if (ny >= 0 && ny < stitchesY && nx >= 0 && nx < stitchesX && !backgroundGrid[ny][nx] && !stitchGrid[ny][nx]) {
-              backgroundGrid[ny][nx] = true;
-              queue.push([ny, nx]);
-            }
-          }
-        }
-        
-        const outlineWidth = 5;
-        const outlinePadding = outlineOffset;
-
-        ctx.strokeStyle = selectedColor.hex;
-        ctx.lineWidth = outlineWidth;
-        ctx.lineCap = 'butt';
-        ctx.beginPath();
-        
-        const offset = outlinePadding + (outlineWidth / 2.0);
-
-        for (let y = 0; y < stitchesY; y++) {
-            for (let x = 0; x < stitchesX; x++) {
-                if (!stitchGrid[y][x]) continue;
-
-                const sx = x * stitchWidth;
-                const sy = y * stitchHeight;
-                const ex = (x + 1) * stitchWidth;
-                const ey = (y + 1) * stitchHeight;
-
-                const isExternalN = (y === 0) || backgroundGrid[y - 1][x];
-                const isExternalS = (y === stitchesY - 1) || backgroundGrid[y + 1][x];
-                const isExternalW = (x === 0) || backgroundGrid[y][x - 1];
-                const isExternalE = (x === stitchesX - 1) || backgroundGrid[y][x + 1];
-
-                if (isExternalN) {
-                    const lineStartX = sx - (isExternalW ? offset : 0);
-                    const lineEndX = ex + (isExternalE ? offset : 0);
-                    ctx.moveTo(lineStartX, sy - offset);
-                    ctx.lineTo(lineEndX, sy - offset);
-                }
-                if (isExternalS) {
-                    const lineStartX = sx - (isExternalW ? offset : 0);
-                    const lineEndX = ex + (isExternalE ? offset : 0);
-                    ctx.moveTo(lineStartX, ey + offset);
-                    ctx.lineTo(lineEndX, ey + offset);
-                }
-                if (isExternalW) {
-                    const lineStartY = sy - (isExternalN ? offset : 0);
-                    const lineEndY = ey + (isExternalS ? offset : 0);
-                    ctx.moveTo(sx - offset, lineStartY);
-                    ctx.lineTo(sx - offset, lineEndY);
-                }
-                if (isExternalE) {
-                    const lineStartY = sy - (isExternalN ? offset : 0);
-                    const lineEndY = ey + (isExternalS ? offset : 0);
-                    ctx.moveTo(ex + offset, lineStartY);
-                    ctx.lineTo(ex + offset, lineEndY);
-                }
-            }
-        }
-        ctx.stroke();
-      }
       
       ctx.fillStyle = selectedColor.hex;
+      ctx.strokeStyle = selectedColor.hex;
+      ctx.lineCap = 'round';
 
       for (let y = 0; y < stitchesY; y++) {
         for (let x = 0; x < stitchesX; x++) {
-          if (stitchGrid[y][x]) {
-            if (fillShape === 'circle') {
-              ctx.beginPath();
-              ctx.arc(x * stitchWidth + stitchWidth / 2, y * stitchHeight + stitchHeight / 2, circleRadius, 0, 2 * Math.PI, false);
-              ctx.fill();
-            } else { // square
-              const rectX = x * stitchWidth + (stitchWidth - squareSize) / 2;
-              const rectY = y * stitchHeight + (stitchHeight - squareSize) / 2;
-              ctx.fillRect(rectX, rectY, squareSize, squareSize);
+          if (currentStitchGrid[y][x]) {
+            const sizeMultiplier = shapeSize / 50;
+
+            const cx = x * stitchWidth + stitchWidth / 2;
+            const cy = y * stitchHeight + stitchHeight / 2;
+
+            const circleRadius = (stitchSize / 3.0) * sizeMultiplier;
+            const squareSize = (stitchSize * 2 / 3.0) * sizeMultiplier;
+            const rectX = x * stitchWidth + (stitchWidth - squareSize) / 2;
+            const rectY = y * stitchHeight + (stitchHeight - squareSize) / 2;
+            
+            const strokeWidth = Math.max(1, (stitchSize / 10) * sizeMultiplier);
+            ctx.lineWidth = strokeWidth;
+
+            const scale = shapeSize / 100;
+            const stitchPaddingX = (stitchWidth * (1 - scale)) / 2;
+            const stitchPaddingY = (stitchHeight * (1 - scale)) / 2;
+            const startX = x * stitchWidth + stitchPaddingX;
+            const startY = y * stitchHeight + stitchPaddingY;
+            const endX = (x + 1) * stitchWidth - stitchPaddingX;
+            const endY = (y + 1) * stitchHeight - stitchPaddingY;
+
+            switch (stitchType) {
+              case 'circle':
+                ctx.beginPath();
+                ctx.arc(cx, cy, circleRadius, 0, 2 * Math.PI, false);
+                ctx.fill();
+                break;
+              case 'square':
+                ctx.fillRect(rectX, rectY, squareSize, squareSize);
+                break;
+              case 'hollow-circle':
+                ctx.beginPath();
+                ctx.arc(cx, cy, circleRadius - strokeWidth / 2, 0, 2 * Math.PI, false);
+                ctx.stroke();
+                break;
+              case 'hollow-square':
+                ctx.strokeRect(rectX + strokeWidth / 2, rectY + strokeWidth / 2, squareSize - strokeWidth, squareSize - strokeWidth);
+                break;
+              case 'cross-stitch':
+                ctx.beginPath();
+                ctx.moveTo(startX, startY);
+                ctx.lineTo(endX, endY);
+                ctx.moveTo(endX, startY);
+                ctx.lineTo(startX, endY);
+                ctx.stroke();
+                break;
+              case 'half-stitch-forward': // /
+                ctx.beginPath();
+                ctx.moveTo(startX, endY);
+                ctx.lineTo(endX, startY);
+                ctx.stroke();
+                break;
+              case 'half-stitch-backward': // \
+                ctx.beginPath();
+                ctx.moveTo(startX, startY);
+                ctx.lineTo(endX, endY);
+                ctx.stroke();
+                break;
             }
           }
         }
@@ -199,12 +173,13 @@ const EditorScreen: React.FC<EditorScreenProps> = ({ imageFile }) => {
       
       setLoading(false);
     });
-  }, [fillShape, outlineOffset, selectedColor]);
+  }, [stitchType, selectedColor, shapeSize]);
 
   useEffect(() => {
     setLoading(true);
     setLoadingMessage('Preparing image...');
     setIsImageLoaded(false);
+    setStitchGrid(null);
 
     const img = imageRef.current;
     let objectUrl: string | null = null;
@@ -269,144 +244,199 @@ const EditorScreen: React.FC<EditorScreenProps> = ({ imageFile }) => {
       }
       
       setLoadingMessage('Creating PDF...');
-      await generatePdf(patternCanvasRef.current, instructions);
+      await generatePdf(patternCanvasRef.current, instructions, stitchesX, stitchesY, threadCount);
       setLoading(false);
     }
   };
   
   const handleDownloadPdfWithoutInstructions = async () => {
-    if (patternCanvasRef.current) {
+    if (patternCanvasRef.current && imageRef.current.complete) {
         setLoading(true);
         setLoadingMessage('Creating PDF...');
-        await generatePdf(patternCanvasRef.current, '');
+
+        const savedThreadCount = localStorage.getItem('settings:threadCount');
+        const threadCount = savedThreadCount ? JSON.parse(savedThreadCount) : '14-count';
+
+        const image = imageRef.current;
+        const aspectRatio = image.width / image.height;
+        const stitchesX = gridSize;
+        const stitchesY = Math.floor(gridSize / aspectRatio);
+        await generatePdf(patternCanvasRef.current, '', stitchesX, stitchesY, threadCount);
         setLoading(false);
     }
   };
-  
-  const handleDownloadSvg = () => {
-    if (!isImageLoaded || !imageRef.current.complete || !patternCanvasRef.current) {
+
+  const handleDownloadPng = () => {
+    if (!stitchGrid || !isImageLoaded || !imageRef.current.complete) {
         alert("Pattern not ready to be downloaded.");
         return;
     }
 
     const image = imageRef.current;
-    const canvas = patternCanvasRef.current;
+    
+    const aspectRatio = image.width / image.height;
+    const stitchesX = gridSize;
+    const stitchesY = Math.floor(gridSize / aspectRatio);
 
+    const pngWidth = 1200;
+    const pngHeight = Math.floor(pngWidth / aspectRatio);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = pngWidth;
+    canvas.height = pngHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const stitchWidth = pngWidth / stitchesX;
+    const stitchHeight = pngHeight / stitchesY;
+    const stitchSize = Math.min(stitchWidth, stitchHeight);
+  
+    ctx.fillStyle = selectedColor.hex;
+    ctx.strokeStyle = selectedColor.hex;
+    ctx.lineCap = 'round';
+    
+    for (let y = 0; y < stitchesY; y++) {
+        for (let x = 0; x < stitchesX; x++) {
+            if (stitchGrid[y][x]) {
+                const sizeMultiplier = shapeSize / 50;
+
+                const cx = x * stitchWidth + stitchWidth / 2;
+                const cy = y * stitchHeight + stitchHeight / 2;
+
+                const circleRadius = (stitchSize / 3.0) * sizeMultiplier;
+                const squareSize = (stitchSize * 2 / 3.0) * sizeMultiplier;
+                const rectX = x * stitchWidth + (stitchWidth - squareSize) / 2;
+                const rectY = y * stitchHeight + (stitchHeight - squareSize) / 2;
+                
+                const strokeWidth = Math.max(1, (stitchSize / 10) * sizeMultiplier);
+                ctx.lineWidth = strokeWidth;
+    
+                const scale = shapeSize / 100;
+                const stitchPaddingX = (stitchWidth * (1 - scale)) / 2;
+                const stitchPaddingY = (stitchHeight * (1 - scale)) / 2;
+                const startX = x * stitchWidth + stitchPaddingX;
+                const startY = y * stitchHeight + stitchPaddingY;
+                const endX = (x + 1) * stitchWidth - stitchPaddingX;
+                const endY = (y + 1) * stitchHeight - stitchPaddingY;
+                
+                switch (stitchType) {
+                    case 'circle':
+                        ctx.beginPath();
+                        ctx.arc(cx, cy, circleRadius, 0, 2 * Math.PI, false);
+                        ctx.fill();
+                        break;
+                    case 'square':
+                        ctx.fillRect(rectX, rectY, squareSize, squareSize);
+                        break;
+                    case 'hollow-circle':
+                        ctx.beginPath();
+                        ctx.arc(cx, cy, circleRadius - strokeWidth / 2, 0, 2 * Math.PI, false);
+                        ctx.stroke();
+                        break;
+                    case 'hollow-square':
+                        ctx.strokeRect(rectX + strokeWidth / 2, rectY + strokeWidth / 2, squareSize - strokeWidth, squareSize - strokeWidth);
+                        break;
+                    case 'cross-stitch':
+                        ctx.beginPath();
+                        ctx.moveTo(startX, startY);
+                        ctx.lineTo(endX, endY);
+                        ctx.moveTo(endX, startY);
+                        ctx.lineTo(startX, endY);
+                        ctx.stroke();
+                        break;
+                    case 'half-stitch-forward':
+                        ctx.beginPath();
+                        ctx.moveTo(startX, endY);
+                        ctx.lineTo(endX, startY);
+                        ctx.stroke();
+                        break;
+                    case 'half-stitch-backward':
+                        ctx.beginPath();
+                        ctx.moveTo(startX, startY);
+                        ctx.lineTo(endX, endY);
+                        ctx.stroke();
+                        break;
+                }
+            }
+        }
+    }
+
+    const dataUrl = canvas.toDataURL('image/png');
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = 'cross-stitch-pattern.png';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+  
+  const handleDownloadSvg = () => {
+    if (!stitchGrid || !isImageLoaded || !imageRef.current.complete) {
+        alert("Pattern not ready to be downloaded.");
+        return;
+    }
+
+    const image = imageRef.current;
+    
     const aspectRatio = image.width / image.height;
     const svgWidth = 600;
     const svgHeight = svgWidth / aspectRatio;
 
     const stitchesX = gridSize;
     const stitchesY = Math.floor(gridSize / aspectRatio);
-
-    const smallCanvas = document.createElement('canvas');
-    smallCanvas.width = stitchesX;
-    smallCanvas.height = stitchesY;
-    const smallCtx = smallCanvas.getContext('2d', { willReadFrequently: true });
-    if (!smallCtx) return;
-
-    smallCtx.imageSmoothingEnabled = true;
-    smallCtx.imageSmoothingQuality = 'high';
-    smallCtx.drawImage(image, 0, 0, stitchesX, stitchesY);
-    const imageData = smallCtx.getImageData(0, 0, stitchesX, stitchesY).data;
-    
-    const stitchGrid: boolean[][] = Array.from({ length: stitchesY }, () => Array(stitchesX).fill(false));
-    for (let y = 0; y < stitchesY; y++) {
-      for (let x = 0; x < stitchesX; x++) {
-        const i = (y * stitchesX + x) * 4;
-        const gray = imageData[i] * 0.299 + imageData[i + 1] * 0.587 + imageData[i + 2] * 0.114;
-        const alpha = imageData[i + 3];
-        if (alpha > 128 && gray < threshold) {
-          stitchGrid[y][x] = true;
-        }
-      }
-    }
     
     const stitchWidth = svgWidth / stitchesX;
     const stitchHeight = svgHeight / stitchesY;
     const stitchSize = Math.min(stitchWidth, stitchHeight);
-    const circleRadius = stitchSize / 3.0;
-    const squareSize = stitchSize * 2 / 3.0;
 
     let svgParts: string[] = [`<svg width="${svgWidth}" height="${svgHeight}" xmlns="http://www.w3.org/2000/svg">`];
-
-    if (outlineOffset > 0) {
-      const backgroundGrid = Array.from({ length: stitchesY }, () => Array(stitchesX).fill(false));
-      const queue: [number, number][] = [];
-      for (let y = 0; y < stitchesY; y++) {
-        if (!stitchGrid[y][0]) { backgroundGrid[y][0] = true; queue.push([y, 0]); }
-        if (!stitchGrid[y][stitchesX - 1]) { backgroundGrid[y][stitchesX - 1] = true; queue.push([y, stitchesX - 1]); }
-      }
-      for (let x = 0; x < stitchesX; x++) {
-        if (!stitchGrid[0][x]) { backgroundGrid[0][x] = true; queue.push([0, x]); }
-        if (!stitchGrid[stitchesY - 1][x]) { backgroundGrid[stitchesY - 1][x] = true; queue.push([stitchesY - 1, x]); }
-      }
-      while (queue.length > 0) {
-        const [y, x] = queue.shift()!;
-        const neighbors = [[y - 1, x], [y + 1, x], [y, x - 1], [y, x + 1]];
-        for (const [ny, nx] of neighbors) {
-          if (ny >= 0 && ny < stitchesY && nx >= 0 && nx < stitchesX && !backgroundGrid[ny][nx] && !stitchGrid[ny][nx]) {
-            backgroundGrid[ny][nx] = true;
-            queue.push([ny, nx]);
-          }
-        }
-      }
-
-      const outlineWidth = 5;
-      const outlinePadding = outlineOffset;
-      const offset = outlinePadding + (outlineWidth / 2.0);
-      let pathData = '';
-
-      for (let y = 0; y < stitchesY; y++) {
-          for (let x = 0; x < stitchesX; x++) {
-              if (!stitchGrid[y][x]) continue;
-              
-              const sx = x * stitchWidth;
-              const sy = y * stitchHeight;
-              const ex = (x + 1) * stitchWidth;
-              const ey = (y + 1) * stitchHeight;
-
-              const isExternalN = (y === 0) || backgroundGrid[y - 1][x];
-              const isExternalS = (y === stitchesY - 1) || backgroundGrid[y + 1][x];
-              const isExternalW = (x === 0) || backgroundGrid[y][x - 1];
-              const isExternalE = (x === stitchesX - 1) || backgroundGrid[y][x + 1];
-
-              if (isExternalN) {
-                  const startX = sx - (isExternalW ? offset : 0);
-                  const endX = ex + (isExternalE ? offset : 0);
-                  pathData += ` M ${startX},${sy - offset} L ${endX},${sy - offset}`;
-              }
-              if (isExternalS) {
-                  const startX = sx - (isExternalW ? offset : 0);
-                  const endX = ex + (isExternalE ? offset : 0);
-                  pathData += ` M ${startX},${ey + offset} L ${endX},${ey + offset}`;
-              }
-              if (isExternalW) {
-                  const startY = sy - (isExternalN ? offset : 0);
-                  const endY = ey + (isExternalS ? offset : 0);
-                  pathData += ` M ${sx - offset},${startY} L ${sx - offset},${endY}`;
-              }
-              if (isExternalE) {
-                  const startY = sy - (isExternalN ? offset : 0);
-                  const endY = ey + (isExternalS ? offset : 0);
-                  pathData += ` M ${ex + offset},${startY} L ${ex + offset},${endY}`;
-              }
-          }
-      }
-      svgParts.push(`<path d="${pathData}" stroke="${selectedColor.hex}" stroke-width="${outlineWidth}" stroke-linecap="butt" fill="none" />`);
-    }
 
     for (let y = 0; y < stitchesY; y++) {
         for (let x = 0; x < stitchesX; x++) {
             if (stitchGrid[y][x]) {
-                if (fillShape === 'circle') {
-                    const cx = x * stitchWidth + stitchWidth / 2;
-                    const cy = y * stitchHeight + stitchHeight / 2;
-                    svgParts.push(`<circle cx="${cx}" cy="${cy}" r="${circleRadius}" fill="${selectedColor.hex}" />`);
-                } else {
-                    const rectX = x * stitchWidth + (stitchWidth - squareSize) / 2;
-                    const rectY = y * stitchHeight + (stitchHeight - squareSize) / 2;
-                    svgParts.push(`<rect x="${rectX}" y="${rectY}" width="${squareSize}" height="${squareSize}" fill="${selectedColor.hex}" />`);
+                const sizeMultiplier = shapeSize / 50;
+
+                const cx = x * stitchWidth + stitchWidth / 2;
+                const cy = y * stitchHeight + stitchHeight / 2;
+                const circleRadius = (stitchSize / 3.0) * sizeMultiplier;
+
+                const squareSize = (stitchSize * 2 / 3.0) * sizeMultiplier;
+                const rectX = x * stitchWidth + (stitchWidth - squareSize) / 2;
+                const rectY = y * stitchHeight + (stitchHeight - squareSize) / 2;
+
+                const strokeWidth = Math.max(0.5, (stitchSize / 10) * sizeMultiplier);
+                
+                const scale = shapeSize / 100;
+                const stitchPaddingX = (stitchWidth * (1 - scale)) / 2;
+                const stitchPaddingY = (stitchHeight * (1 - scale)) / 2;
+                const startX = x * stitchWidth + stitchPaddingX;
+                const startY = y * stitchHeight + stitchPaddingY;
+                const endX = (x + 1) * stitchWidth - stitchPaddingX;
+                const endY = (y + 1) * stitchHeight - stitchPaddingY;
+                
+                switch (stitchType) {
+                    case 'circle':
+                        svgParts.push(`<circle cx="${cx}" cy="${cy}" r="${circleRadius}" fill="${selectedColor.hex}" />`);
+                        break;
+                    case 'square':
+                        svgParts.push(`<rect x="${rectX}" y="${rectY}" width="${squareSize}" height="${squareSize}" fill="${selectedColor.hex}" />`);
+                        break;
+                    case 'hollow-circle':
+                        svgParts.push(`<circle cx="${cx}" cy="${cy}" r="${circleRadius - strokeWidth / 2}" fill="none" stroke="${selectedColor.hex}" stroke-width="${strokeWidth}" />`);
+                        break;
+                    case 'hollow-square':
+                        svgParts.push(`<rect x="${rectX + strokeWidth / 2}" y="${rectY + strokeWidth / 2}" width="${squareSize - strokeWidth}" height="${squareSize - strokeWidth}" fill="none" stroke="${selectedColor.hex}" stroke-width="${strokeWidth}" />`);
+                        break;
+                    case 'cross-stitch':
+                        svgParts.push(`<line x1="${startX}" y1="${startY}" x2="${endX}" y2="${endY}" stroke="${selectedColor.hex}" stroke-width="${strokeWidth}" stroke-linecap="round" />`);
+                        svgParts.push(`<line x1="${endX}" y1="${startY}" x2="${startX}" y2="${endY}" stroke="${selectedColor.hex}" stroke-width="${strokeWidth}" stroke-linecap="round" />`);
+                        break;
+                    case 'half-stitch-forward':
+                        svgParts.push(`<line x1="${startX}" y1="${endY}" x2="${endX}" y2="${startY}" stroke="${selectedColor.hex}" stroke-width="${strokeWidth}" stroke-linecap="round" />`);
+                        break;
+                    case 'half-stitch-backward':
+                        svgParts.push(`<line x1="${startX}" y1="${startY}" x2="${endX}" y2="${endY}" stroke="${selectedColor.hex}" stroke-width="${strokeWidth}" stroke-linecap="round" />`);
+                        break;
                 }
             }
         }
@@ -419,7 +449,7 @@ const EditorScreen: React.FC<EditorScreenProps> = ({ imageFile }) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'cross-stitch-silhouette-pattern.svg';
+    a.download = 'cross-stitch-pattern.svg';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -435,8 +465,16 @@ const EditorScreen: React.FC<EditorScreenProps> = ({ imageFile }) => {
           <p className="mt-4 text-slate-600 font-semibold">{loadingMessage}</p>
         </div>
       )}
-      <div className="lg:col-span-2 relative w-full h-[60vh] lg:h-auto rounded-xl overflow-hidden shadow-lg bg-white flex items-center justify-center p-4 border border-slate-200">
-        <canvas ref={patternCanvasRef} />
+      <div className="lg:col-span-2 relative w-full h-[60vh] lg:h-auto lg:aspect-square rounded-xl overflow-hidden shadow-lg bg-slate-50 flex items-center justify-center p-4 border border-slate-200">
+        <div className="w-full h-full flex items-center justify-center">
+          <canvas
+            ref={patternCanvasRef}
+            style={{
+              maxHeight: '100%',
+              maxWidth: '100%'
+            }}
+          />
+        </div>
       </div>
 
       <div className="lg:col-span-1 flex flex-col space-y-6">
@@ -451,35 +489,45 @@ const EditorScreen: React.FC<EditorScreenProps> = ({ imageFile }) => {
               <input id="threshold" type="range" min="0" max="255" value={threshold} onChange={e => setThreshold(Number(e.target.value))} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-sky-500" />
             </div>
             <div>
-              <label htmlFor="outlineOffset" className="block text-sm font-medium text-slate-700">Outline Padding: {outlineOffset}px</label>
-              <input id="outlineOffset" type="range" min="0" max="20" value={outlineOffset} onChange={e => setOutlineOffset(Number(e.target.value))} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-sky-500" />
+              <label className="block text-sm font-medium text-slate-700 mb-2">Stitch Type</label>
+               <div className="grid grid-cols-4 gap-2">
+                {(
+                    [
+                        { type: 'circle', icon: SolidCircleIcon, title: 'Solid Circle' },
+                        { type: 'hollow-circle', icon: HollowCircleIcon, title: 'Hollow Circle' },
+                        { type: 'square', icon: SolidSquareIcon, title: 'Solid Square' },
+                        { type: 'hollow-square', icon: HollowSquareIcon, title: 'Hollow Square' },
+                        { type: 'cross-stitch', icon: CrossStitchIcon, title: 'Cross Stitch (X)' },
+                        { type: 'half-stitch-forward', icon: HalfStitchForwardIcon, title: 'Half Stitch (/)' },
+                        { type: 'half-stitch-backward', icon: HalfStitchBackwardIcon, title: 'Half Stitch (\\)' },
+                    ] as const
+                ).map(({type, icon: Icon, title}) => (
+                    <button
+                        key={type}
+                        title={title}
+                        onClick={() => setStitchType(type)}
+                        className={`flex items-center justify-center p-3 rounded-lg border font-semibold transition-colors ${
+                            stitchType === type
+                            ? 'bg-sky-500 border-sky-500 text-white'
+                            : 'bg-white border-slate-300 text-slate-700 hover:border-sky-500'
+                        }`}
+                    >
+                        <Icon className="w-5 h-5" />
+                    </button>
+                ))}
+              </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Fill Shape</label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => setFillShape('circle')}
-                  className={`flex items-center justify-center gap-2 p-3 rounded-lg border font-semibold transition-colors ${
-                    fillShape === 'circle'
-                      ? 'bg-sky-500 border-sky-500 text-white'
-                      : 'bg-white border-slate-300 text-slate-700 hover:border-sky-500'
-                  }`}
-                >
-                  <CircleIcon className="w-5 h-5" />
-                  <span>Circle</span>
-                </button>
-                <button
-                  onClick={() => setFillShape('square')}
-                  className={`flex items-center justify-center gap-2 p-3 rounded-lg border font-semibold transition-colors ${
-                    fillShape === 'square'
-                      ? 'bg-sky-500 border-sky-500 text-white'
-                      : 'bg-white border-slate-300 text-slate-700 hover:border-sky-500'
-                  }`}
-                >
-                  <SquareIcon className="w-5 h-5" />
-                  <span>Square</span>
-                </button>
-              </div>
+              <label htmlFor="shapeSize" className="block text-sm font-medium text-slate-700 mt-4">Shape Size: {shapeSize}</label>
+              <input
+                id="shapeSize"
+                type="range"
+                min="1"
+                max="100"
+                value={shapeSize}
+                onChange={(e) => setShapeSize(Number(e.target.value))}
+                className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-sky-500"
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">Thread Color</label>
@@ -518,6 +566,14 @@ const EditorScreen: React.FC<EditorScreenProps> = ({ imageFile }) => {
           >
             <DownloadIcon className="w-5 h-5" />
             PDF (Pattern Only)
+          </button>
+           <button
+            onClick={handleDownloadPng}
+            disabled={loading}
+            className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-slate-700 text-white font-semibold rounded-lg shadow-md hover:bg-slate-800 transition-all disabled:bg-slate-400"
+          >
+            <DownloadIcon className="w-5 h-5" />
+            Download PNG
           </button>
           <button
             onClick={handleDownloadSvg}

@@ -4,17 +4,9 @@ export interface DmcColor {
   hex: string;
 }
 
-// FIX: Add SavedPattern interface to fix missing type error in components/MyPatternsScreen.tsx.
+// FIX: Add SavedPattern interface to fix import error in MyPatternsScreen.tsx.
 export interface SavedPattern {
   id: string;
-  createdAt: number;
   previewDataUrl: string;
-  imageDataUrl: string;
-  settings: {
-    gridSize: number;
-    threshold: number;
-    fillShape: 'circle' | 'square';
-    outlineOffset: number;
-    selectedColor: DmcColor;
-  };
+  createdAt: number;
 }
