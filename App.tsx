@@ -175,18 +175,37 @@ const App: React.FC = () => {
     );
   };
 
-  return (
-    <div className="min-h-screen font-sans antialiased text-slate-800 bg-slate-100">
-      {renderHeader()}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {renderSubHeader()}
-        {renderScreen()}
-      </main>
-      <section className="py-12 sm:py-20 bg-slate-200/70">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <HowToVideo />
+  const renderFooter = () => (
+    <footer className="bg-slate-800 text-slate-400 py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row justify-between items-center text-center sm:text-left">
+        <p className="text-sm">&copy; {new Date().getFullYear()} Cross-Stitch Genie. All rights reserved.</p>
+        <div className="flex gap-6 mt-4 sm:mt-0">
+          <button onClick={() => navigateTo('termsOfService')} className="text-sm hover:text-white transition-colors">
+            Terms of Service
+          </button>
+          <button onClick={() => navigateTo('privacyPolicy')} className="text-sm hover:text-white transition-colors">
+            Privacy Policy
+          </button>
         </div>
-      </section>
+      </div>
+    </footer>
+  );
+
+  return (
+    <div className="min-h-screen font-sans antialiased text-slate-800 bg-slate-100 flex flex-col">
+      <div className="flex-grow">
+        {renderHeader()}
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          {renderSubHeader()}
+          {renderScreen()}
+        </main>
+        <section className="py-12 sm:py-20 bg-slate-200/70">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <HowToVideo />
+          </div>
+        </section>
+      </div>
+      {renderFooter()}
     </div>
   );
 };

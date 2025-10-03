@@ -54,7 +54,7 @@ const UploadScreen: React.FC<UploadScreenProps> = ({ onImageUpload }) => {
   return (
     <div className="flex flex-col items-center justify-center text-center py-12 sm:py-24">
       <div className="w-full max-w-2xl">
-        <h2 className="text-3xl sm:text-5xl font-bold text-slate-800 mb-4">From Picture to Pattern in a Flash</h2>
+        <h2 className="text-4xl sm:text-6xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-sky-500 to-cyan-400 mb-4">Picture to Pattern</h2>
         <p className="text-slate-600 text-lg mb-8 max-w-lg mx-auto">
           Cross-Stitch Genie takes the guesswork out of pattern creation. Upload any image and instantly get a simple, beautiful pattern, ready for your next project.
         </p>
