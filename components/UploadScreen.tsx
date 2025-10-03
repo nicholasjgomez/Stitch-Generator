@@ -52,15 +52,18 @@ const UploadScreen: React.FC<UploadScreenProps> = ({ onImageUpload }) => {
   };
 
   return (
-    <div className="flex flex-col space-y-8">
-      <div>
-        <h2 className="text-2xl font-bold text-slate-800 mb-4">Start with an image</h2>
+    <div className="flex flex-col items-center justify-center text-center py-12 sm:py-24">
+      <div className="w-full max-w-2xl">
+        <h2 className="text-3xl sm:text-4xl font-bold text-slate-800 mb-4">Make Your Stitch Pattern</h2>
+        <p className="text-slate-600 mb-8 max-w-lg mx-auto">
+          Upload any image and we'll magically transform it into a simple, single-color cross-stitch pattern, ready for you to start stitching.
+        </p>
         <div
           onDrop={handleDrop}
           onDragOver={handleDragOver}
           onDragEnter={handleDragEnter}
           onDragLeave={handleDragLeave}
-          className={`flex flex-col items-center justify-center p-8 border-2 border-dashed rounded-xl transition-colors ${
+          className={`flex flex-col items-center justify-center p-8 sm:p-12 border-2 border-dashed rounded-xl transition-colors ${
             isDragging ? 'border-sky-500 bg-sky-50' : 'border-slate-300 bg-white'
           }`}
         >

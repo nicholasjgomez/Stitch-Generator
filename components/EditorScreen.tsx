@@ -2,12 +2,11 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { generatePdf } from '../services/pdfService';
 import { getCrossStitchInstructions } from '../services/geminiService';
 import Spinner from './Spinner';
-import { DownloadIcon, CircleIcon, SquareIcon, SaveIcon } from './Icons';
-import { SavedPattern, DmcColor } from '../types';
+import { DownloadIcon, CircleIcon, SquareIcon } from './Icons';
+import { DmcColor } from '../types';
 
 interface EditorScreenProps {
-  imageFile?: File;
-  savedPattern?: SavedPattern;
+  imageFile: File;
 }
 
 type FillShape = 'circle' | 'square';
@@ -21,7 +20,7 @@ const DMC_COLORS: DmcColor[] = [
   { name: 'Black', dmc: '#310', hex: '#000000' },
 ];
 
-const EditorScreen: React.FC<EditorScreenProps> = ({ imageFile, savedPattern }) => {
+const EditorScreen: React.FC<EditorScreenProps> = ({ imageFile }) => {
   const [gridSize, setGridSize] = useState(32);
   const [threshold, setThreshold] = useState(128);
   const [fillShape, setFillShape] = useState<FillShape>('circle');
@@ -45,9 +44,22 @@ const EditorScreen: React.FC<EditorScreenProps> = ({ imageFile, savedPattern }) 
       }
 
       const aspectRatio = image.width / image.height;
-      const canvasWidth = canvas.parentElement?.clientWidth || 300;
-      canvas.width = canvasWidth;
-      canvas.height = canvasWidth / aspectRatio;
+      const container = canvas.parentElement;
+      if (!container) return;
+
+      const canvasWidth = container.clientWidth;
+      const canvasHeight = container.clientHeight;
+      
+      let renderWidth = canvasWidth;
+      let renderHeight = canvasWidth / aspectRatio;
+
+      if (renderHeight > canvasHeight) {
+        renderHeight = canvasHeight;
+        renderWidth = canvasHeight * aspectRatio;
+      }
+
+      canvas.width = renderWidth;
+      canvas.height = renderHeight;
       
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
@@ -201,14 +213,7 @@ const EditorScreen: React.FC<EditorScreenProps> = ({ imageFile, savedPattern }) 
         setLoading(false);
     };
 
-    if (savedPattern) {
-        setGridSize(savedPattern.gridSize);
-        setThreshold(savedPattern.threshold);
-        setFillShape(savedPattern.fillShape);
-        setOutlineOffset(savedPattern.outlineOffset);
-        setSelectedColor(savedPattern.selectedColor);
-        img.src = savedPattern.imageDataUrl;
-    } else if (imageFile) {
+    if (imageFile) {
         objectUrl = URL.createObjectURL(imageFile);
         img.src = objectUrl;
     }
@@ -221,7 +226,7 @@ const EditorScreen: React.FC<EditorScreenProps> = ({ imageFile, savedPattern }) 
             URL.revokeObjectURL(objectUrl);
         }
     };
-}, [imageFile, savedPattern]);
+  }, [imageFile]);
 
 
   useEffect(() => {
@@ -229,41 +234,6 @@ const EditorScreen: React.FC<EditorScreenProps> = ({ imageFile, savedPattern }) 
       generatePattern(imageRef.current, gridSize, threshold);
     }
   }, [isImageLoaded, gridSize, threshold, generatePattern]);
-
-  const handleSavePattern = () => {
-    if (!isImageLoaded || !imageRef.current.complete || !patternCanvasRef.current) {
-        alert("Pattern is not ready to be saved.");
-        return;
-    }
-
-    const previewCanvas = document.createElement('canvas');
-    const previewSize = 128;
-    previewCanvas.width = previewSize;
-    previewCanvas.height = previewSize / (patternCanvasRef.current.width / patternCanvasRef.current.height);
-    const prevCtx = previewCanvas.getContext('2d');
-    prevCtx?.drawImage(patternCanvasRef.current, 0, 0, previewCanvas.width, previewCanvas.height);
-
-
-    const newPattern: SavedPattern = {
-        id: `pattern_${Date.now()}`,
-        imageDataUrl: imageRef.current.src,
-        previewDataUrl: previewCanvas.toDataURL('image/png'),
-        gridSize,
-        threshold,
-        fillShape,
-        outlineOffset,
-        selectedColor,
-        createdAt: new Date().toISOString(),
-    };
-
-    const saved = localStorage.getItem('myPatterns');
-    const patterns = saved ? JSON.parse(saved) : [];
-    patterns.unshift(newPattern);
-    localStorage.setItem('myPatterns', JSON.stringify(patterns));
-    
-    alert('Pattern saved successfully!');
-};
-
 
   const handleDownloadPdfWithInstructions = async () => {
     if (patternCanvasRef.current && imageRef.current.complete) {
@@ -317,8 +287,8 @@ const EditorScreen: React.FC<EditorScreenProps> = ({ imageFile, savedPattern }) 
     const canvas = patternCanvasRef.current;
 
     const aspectRatio = image.width / image.height;
-    const svgWidth = canvas.width;
-    const svgHeight = canvas.height;
+    const svgWidth = 600;
+    const svgHeight = svgWidth / aspectRatio;
 
     const stitchesX = gridSize;
     const stitchesY = Math.floor(gridSize / aspectRatio);
@@ -448,112 +418,106 @@ const EditorScreen: React.FC<EditorScreenProps> = ({ imageFile, savedPattern }) 
 
 
   return (
-    <div className="flex flex-col space-y-6">
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
       {loading && (
-        <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center z-20">
+        <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex flex-col items-center justify-center z-20 col-span-full">
           <Spinner />
           <p className="mt-4 text-slate-600 font-semibold">{loadingMessage}</p>
         </div>
       )}
-      <div className="relative w-full rounded-xl overflow-hidden shadow-lg bg-gray-200">
+      <div className="lg:col-span-2 relative w-full h-[60vh] lg:h-auto rounded-xl overflow-hidden shadow-lg bg-white flex items-center justify-center p-4 border border-slate-200">
         <canvas ref={patternCanvasRef} />
       </div>
 
-      <div className="p-4 bg-white rounded-xl border border-slate-200 shadow-sm">
-        <div className="space-y-4">
-          <div>
-            <label htmlFor="gridSize" className="block text-sm font-medium text-slate-700">Stitch Count (width): {gridSize}</label>
-            <input id="gridSize" type="range" min="16" max="100" value={gridSize} onChange={e => setGridSize(Number(e.target.value))} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-sky-500" />
-          </div>
-          <div>
-            <label htmlFor="threshold" className="block text-sm font-medium text-slate-700">Silhouette Threshold: {threshold}</label>
-            <input id="threshold" type="range" min="0" max="255" value={threshold} onChange={e => setThreshold(Number(e.target.value))} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-sky-500" />
-          </div>
-          <div>
-            <label htmlFor="outlineOffset" className="block text-sm font-medium text-slate-700">Outline Offset: {outlineOffset}px</label>
-            <input id="outlineOffset" type="range" min="0" max="10" value={outlineOffset} onChange={e => setOutlineOffset(Number(e.target.value))} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-sky-500" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">Fill Shape</label>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => setFillShape('circle')}
-                className={`flex items-center justify-center gap-2 p-3 rounded-lg border font-semibold transition-colors ${
-                  fillShape === 'circle'
-                    ? 'bg-sky-500 border-sky-500 text-white'
-                    : 'bg-white border-slate-300 text-slate-700 hover:border-sky-500'
-                }`}
-              >
-                <CircleIcon className="w-5 h-5" />
-                <span>Circle</span>
-              </button>
-              <button
-                onClick={() => setFillShape('square')}
-                className={`flex items-center justify-center gap-2 p-3 rounded-lg border font-semibold transition-colors ${
-                  fillShape === 'square'
-                    ? 'bg-sky-500 border-sky-500 text-white'
-                    : 'bg-white border-slate-300 text-slate-700 hover:border-sky-500'
-                }`}
-              >
-                <SquareIcon className="w-5 h-5" />
-                <span>Square</span>
-              </button>
+      <div className="lg:col-span-1 flex flex-col space-y-6">
+        <div className="p-6 bg-white rounded-xl border border-slate-200 shadow-sm">
+          <div className="space-y-4">
+            <div>
+              <label htmlFor="gridSize" className="block text-sm font-medium text-slate-700">Stitch Count (width): {gridSize}</label>
+              <input id="gridSize" type="range" min="16" max="100" value={gridSize} onChange={e => setGridSize(Number(e.target.value))} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-sky-500" />
             </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">Thread Color</label>
-            <div className="grid grid-cols-6 gap-2">
-              {DMC_COLORS.map((color) => (
+            <div>
+              <label htmlFor="threshold" className="block text-sm font-medium text-slate-700">Silhouette Threshold: {threshold}</label>
+              <input id="threshold" type="range" min="0" max="255" value={threshold} onChange={e => setThreshold(Number(e.target.value))} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-sky-500" />
+            </div>
+            <div>
+              <label htmlFor="outlineOffset" className="block text-sm font-medium text-slate-700">Outline Offset: {outlineOffset}px</label>
+              <input id="outlineOffset" type="range" min="0" max="10" value={outlineOffset} onChange={e => setOutlineOffset(Number(e.target.value))} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-sky-500" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Fill Shape</label>
+              <div className="grid grid-cols-2 gap-2">
                 <button
-                  key={color.dmc}
-                  onClick={() => setSelectedColor(color)}
-                  className={`w-full h-10 rounded-lg border-2 transition-all ${
-                    selectedColor.dmc === color.dmc
-                      ? 'border-sky-500 ring-2 ring-sky-500 ring-offset-1'
-                      : 'border-slate-300 hover:border-sky-400'
+                  onClick={() => setFillShape('circle')}
+                  className={`flex items-center justify-center gap-2 p-3 rounded-lg border font-semibold transition-colors ${
+                    fillShape === 'circle'
+                      ? 'bg-sky-500 border-sky-500 text-white'
+                      : 'bg-white border-slate-300 text-slate-700 hover:border-sky-500'
                   }`}
-                  style={{ backgroundColor: color.hex }}
-                  aria-label={`Select color ${color.name} ${color.dmc}`}
-                />
-              ))}
+                >
+                  <CircleIcon className="w-5 h-5" />
+                  <span>Circle</span>
+                </button>
+                <button
+                  onClick={() => setFillShape('square')}
+                  className={`flex items-center justify-center gap-2 p-3 rounded-lg border font-semibold transition-colors ${
+                    fillShape === 'square'
+                      ? 'bg-sky-500 border-sky-500 text-white'
+                      : 'bg-white border-slate-300 text-slate-700 hover:border-sky-500'
+                  }`}
+                >
+                  <SquareIcon className="w-5 h-5" />
+                  <span>Square</span>
+                </button>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Thread Color</label>
+              <div className="grid grid-cols-6 gap-2">
+                {DMC_COLORS.map((color) => (
+                  <button
+                    key={color.dmc}
+                    onClick={() => setSelectedColor(color)}
+                    className={`w-full h-10 rounded-lg border-2 transition-all ${
+                      selectedColor.dmc === color.dmc
+                        ? 'border-sky-500 ring-2 ring-sky-500 ring-offset-1'
+                        : 'border-slate-300 hover:border-sky-400'
+                    }`}
+                    style={{ backgroundColor: color.hex }}
+                    aria-label={`Select color ${color.name} ${color.dmc}`}
+                  />
+                ))}
+              </div>
             </div>
           </div>
         </div>
-      </div>
-      
-      <div className="flex flex-col space-y-4">
-        <button
-          onClick={handleSavePattern}
-          disabled={loading}
-          className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-indigo-500 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-600 transition-all disabled:bg-indigo-300"
-        >
-          <SaveIcon className="w-5 h-5" />
-          Save Pattern
-        </button>
-         <button
-          onClick={handleDownloadPdfWithInstructions}
-          disabled={loading}
-          className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-sky-500 text-white font-semibold rounded-lg shadow-md hover:bg-sky-600 transition-all disabled:bg-sky-300"
-        >
-          <DownloadIcon className="w-5 h-5" />
-          PDF (with Instructions)
-        </button>
-        <button
-          onClick={handleDownloadPdfWithoutInstructions}
-          disabled={loading}
-          className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-slate-700 text-white font-semibold rounded-lg shadow-md hover:bg-slate-800 transition-all disabled:bg-slate-400"
-        >
-          <DownloadIcon className="w-5 h-5" />
-          PDF (Pattern Only)
-        </button>
-        <button
-          onClick={handleDownloadSvg}
-          disabled={loading}
-          className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-slate-700 text-white font-semibold rounded-lg shadow-md hover:bg-slate-800 transition-all disabled:bg-slate-400"
-        >
-          <DownloadIcon className="w-5 h-5" />
-          Download SVG
-        </button>
+        
+        <div className="flex flex-col space-y-4">
+           <button
+            onClick={handleDownloadPdfWithInstructions}
+            disabled={loading}
+            className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-sky-500 text-white font-semibold rounded-lg shadow-md hover:bg-sky-600 transition-all disabled:bg-sky-300"
+          >
+            <DownloadIcon className="w-5 h-5" />
+            PDF (with Instructions)
+          </button>
+          <button
+            onClick={handleDownloadPdfWithoutInstructions}
+            disabled={loading}
+            className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-slate-700 text-white font-semibold rounded-lg shadow-md hover:bg-slate-800 transition-all disabled:bg-slate-400"
+          >
+            <DownloadIcon className="w-5 h-5" />
+            PDF (Pattern Only)
+          </button>
+          <button
+            onClick={handleDownloadSvg}
+            disabled={loading}
+            className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-slate-700 text-white font-semibold rounded-lg shadow-md hover:bg-slate-800 transition-all disabled:bg-slate-400"
+          >
+            <DownloadIcon className="w-5 h-5" />
+            Download SVG
+          </button>
+        </div>
       </div>
     </div>
   );
