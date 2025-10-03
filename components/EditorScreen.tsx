@@ -24,7 +24,7 @@ const EditorScreen: React.FC<EditorScreenProps> = ({ imageFile }) => {
   const [gridSize, setGridSize] = useState(32);
   const [threshold, setThreshold] = useState(128);
   const [fillShape, setFillShape] = useState<FillShape>('circle');
-  const [outlineOffset, setOutlineOffset] = useState(0);
+  const [outlineOffset, setOutlineOffset] = useState(5);
   const [selectedColor, setSelectedColor] = useState(DMC_COLORS[5]); // Default to black
   const [loading, setLoading] = useState(true);
   const [loadingMessage, setLoadingMessage] = useState('Preparing image...');
@@ -126,49 +126,55 @@ const EditorScreen: React.FC<EditorScreenProps> = ({ imageFile }) => {
           }
         }
         
+        const outlineWidth = 5;
+        const outlinePadding = outlineOffset;
+
         ctx.strokeStyle = selectedColor.hex;
-        ctx.lineWidth = 1;
+        ctx.lineWidth = outlineWidth;
+        ctx.lineCap = 'butt';
         ctx.beginPath();
-        const offset = outlineOffset;
+        
+        const offset = outlinePadding + (outlineWidth / 2.0);
 
         for (let y = 0; y < stitchesY; y++) {
-          for (let x = 0; x < stitchesX; x++) {
-            if (!stitchGrid[y][x]) continue;
+            for (let x = 0; x < stitchesX; x++) {
+                if (!stitchGrid[y][x]) continue;
 
-            const sx = x * stitchWidth;
-            const sy = y * stitchHeight;
-            const ex = (x + 1) * stitchWidth;
-            const ey = (y + 1) * stitchHeight;
+                const sx = x * stitchWidth;
+                const sy = y * stitchHeight;
+                const ex = (x + 1) * stitchWidth;
+                const ey = (y + 1) * stitchHeight;
 
-            // Check if neighbors are in the exterior background
-            const hasExternalN = (y === 0) || backgroundGrid[y - 1][x];
-            const hasExternalS = (y === stitchesY - 1) || backgroundGrid[y + 1][x];
-            const hasExternalW = (x === 0) || backgroundGrid[y][x - 1];
-            const hasExternalE = (x === stitchesX - 1) || backgroundGrid[y][x + 1];
+                const isExternalN = (y === 0) || backgroundGrid[y - 1][x];
+                const isExternalS = (y === stitchesY - 1) || backgroundGrid[y + 1][x];
+                const isExternalW = (x === 0) || backgroundGrid[y][x - 1];
+                const isExternalE = (x === stitchesX - 1) || backgroundGrid[y][x + 1];
 
-            // Straight edges
-            if (hasExternalN) { ctx.moveTo(sx, sy - offset); ctx.lineTo(ex, sy - offset); }
-            if (hasExternalS) { ctx.moveTo(sx, ey + offset); ctx.lineTo(ex, ey + offset); }
-            if (hasExternalW) { ctx.moveTo(sx - offset, sy); ctx.lineTo(sx - offset, ey); }
-            if (hasExternalE) { ctx.moveTo(ex + offset, sy); ctx.lineTo(ex + offset, ey); }
-
-            // Convex (outer) corners
-            if (hasExternalN && hasExternalW) { ctx.moveTo(sx - offset, sy); ctx.arc(sx, sy, offset, Math.PI, 1.5 * Math.PI); }
-            if (hasExternalN && hasExternalE) { ctx.moveTo(ex, sy - offset); ctx.arc(ex, sy, offset, 1.5 * Math.PI, 2 * Math.PI); }
-            if (hasExternalS && hasExternalW) { ctx.moveTo(sx, ey + offset); ctx.arc(sx, ey, offset, 0.5 * Math.PI, Math.PI); }
-            if (hasExternalS && hasExternalE) { ctx.moveTo(ex + offset, ey); ctx.arc(ex, ey, offset, 0, 0.5 * Math.PI); }
-
-            // Concave (inner) corners on the exterior path
-            const hasExternalNW = (y > 0 && x > 0) && backgroundGrid[y-1][x-1];
-            const hasExternalNE = (y > 0 && x < stitchesX - 1) && backgroundGrid[y-1][x+1];
-            const hasExternalSW = (y < stitchesY - 1 && x > 0) && backgroundGrid[y+1][x-1];
-            const hasExternalSE = (y < stitchesY - 1 && x < stitchesX - 1) && backgroundGrid[y+1][x+1];
-
-            if (hasExternalNW && !hasExternalN && !hasExternalW) { ctx.moveTo(sx, sy - offset); ctx.arc(sx - offset, sy - offset, offset, 0, 0.5 * Math.PI); }
-            if (hasExternalNE && !hasExternalN && !hasExternalE) { ctx.moveTo(ex + offset, sy); ctx.arc(ex + offset, sy - offset, offset, 0.5 * Math.PI, Math.PI); }
-            if (hasExternalSW && !hasExternalS && !hasExternalW) { ctx.moveTo(sx - offset, ey); ctx.arc(sx - offset, ey + offset, offset, 1.5 * Math.PI, 2 * Math.PI); }
-            if (hasExternalSE && !hasExternalS && !hasExternalE) { ctx.moveTo(ex, ey + offset); ctx.arc(ex + offset, ey + offset, offset, Math.PI, 1.5 * Math.PI); }
-          }
+                if (isExternalN) {
+                    const lineStartX = sx - (isExternalW ? offset : 0);
+                    const lineEndX = ex + (isExternalE ? offset : 0);
+                    ctx.moveTo(lineStartX, sy - offset);
+                    ctx.lineTo(lineEndX, sy - offset);
+                }
+                if (isExternalS) {
+                    const lineStartX = sx - (isExternalW ? offset : 0);
+                    const lineEndX = ex + (isExternalE ? offset : 0);
+                    ctx.moveTo(lineStartX, ey + offset);
+                    ctx.lineTo(lineEndX, ey + offset);
+                }
+                if (isExternalW) {
+                    const lineStartY = sy - (isExternalN ? offset : 0);
+                    const lineEndY = ey + (isExternalS ? offset : 0);
+                    ctx.moveTo(sx - offset, lineStartY);
+                    ctx.lineTo(sx - offset, lineEndY);
+                }
+                if (isExternalE) {
+                    const lineStartY = sy - (isExternalN ? offset : 0);
+                    const lineEndY = ey + (isExternalS ? offset : 0);
+                    ctx.moveTo(ex + offset, lineStartY);
+                    ctx.lineTo(ex + offset, lineEndY);
+                }
+            }
         }
         ctx.stroke();
       }
@@ -346,44 +352,48 @@ const EditorScreen: React.FC<EditorScreenProps> = ({ imageFile }) => {
         }
       }
 
-      const offset = outlineOffset;
+      const outlineWidth = 5;
+      const outlinePadding = outlineOffset;
+      const offset = outlinePadding + (outlineWidth / 2.0);
       let pathData = '';
+
       for (let y = 0; y < stitchesY; y++) {
-        for (let x = 0; x < stitchesX; x++) {
-          if (!stitchGrid[y][x]) continue;
-          
-          const sx = x * stitchWidth;
-          const sy = y * stitchHeight;
-          const ex = (x + 1) * stitchWidth;
-          const ey = (y + 1) * stitchHeight;
+          for (let x = 0; x < stitchesX; x++) {
+              if (!stitchGrid[y][x]) continue;
+              
+              const sx = x * stitchWidth;
+              const sy = y * stitchHeight;
+              const ex = (x + 1) * stitchWidth;
+              const ey = (y + 1) * stitchHeight;
 
-          const hasExternalN = (y === 0) || backgroundGrid[y - 1][x];
-          const hasExternalS = (y === stitchesY - 1) || backgroundGrid[y + 1][x];
-          const hasExternalW = (x === 0) || backgroundGrid[y][x - 1];
-          const hasExternalE = (x === stitchesX - 1) || backgroundGrid[y][x + 1];
+              const isExternalN = (y === 0) || backgroundGrid[y - 1][x];
+              const isExternalS = (y === stitchesY - 1) || backgroundGrid[y + 1][x];
+              const isExternalW = (x === 0) || backgroundGrid[y][x - 1];
+              const isExternalE = (x === stitchesX - 1) || backgroundGrid[y][x + 1];
 
-          if (hasExternalN) pathData += ` M ${sx},${sy-offset} L ${ex},${sy-offset}`;
-          if (hasExternalS) pathData += ` M ${sx},${ey+offset} L ${ex},${ey+offset}`;
-          if (hasExternalW) pathData += ` M ${sx-offset},${sy} L ${sx-offset},${ey}`;
-          if (hasExternalE) pathData += ` M ${ex+offset},${sy} L ${ex+offset},${ey}`;
-          
-          if (hasExternalN && hasExternalW) pathData += ` M ${sx-offset},${sy} A ${offset},${offset} 0 0 1 ${sx},${sy-offset}`;
-          if (hasExternalN && hasExternalE) pathData += ` M ${ex},${sy-offset} A ${offset},${offset} 0 0 1 ${ex+offset},${sy}`;
-          if (hasExternalS && hasExternalW) pathData += ` M ${sx},${ey+offset} A ${offset},${offset} 0 0 1 ${sx-offset},${ey}`;
-          if (hasExternalS && hasExternalE) pathData += ` M ${ex+offset},${ey} A ${offset},${offset} 0 0 1 ${ex},${ey+offset}`;
-
-          const hasExternalNW = (y > 0 && x > 0) && backgroundGrid[y-1][x-1];
-          const hasExternalNE = (y > 0 && x < stitchesX - 1) && backgroundGrid[y-1][x+1];
-          const hasExternalSW = (y < stitchesY - 1 && x > 0) && backgroundGrid[y+1][x-1];
-          const hasExternalSE = (y < stitchesY - 1 && x < stitchesX - 1) && backgroundGrid[y+1][x+1];
-
-          if (hasExternalNW && !hasExternalN && !hasExternalW) pathData += ` M ${sx},${sy - offset} A ${offset},${offset} 0 0 0 ${sx - offset},${sy}`;
-          if (hasExternalNE && !hasExternalN && !hasExternalE) pathData += ` M ${ex + offset},${sy} A ${offset},${offset} 0 0 0 ${ex},${sy - offset}`;
-          if (hasExternalSW && !hasExternalS && !hasExternalW) pathData += ` M ${sx - offset},${ey} A ${offset},${offset} 0 0 0 ${sx},${ey + offset}`;
-          if (hasExternalSE && !hasExternalS && !hasExternalE) pathData += ` M ${ex},${ey + offset} A ${offset},${offset} 0 0 0 ${ex + offset},${ey}`;
-        }
+              if (isExternalN) {
+                  const startX = sx - (isExternalW ? offset : 0);
+                  const endX = ex + (isExternalE ? offset : 0);
+                  pathData += ` M ${startX},${sy - offset} L ${endX},${sy - offset}`;
+              }
+              if (isExternalS) {
+                  const startX = sx - (isExternalW ? offset : 0);
+                  const endX = ex + (isExternalE ? offset : 0);
+                  pathData += ` M ${startX},${ey + offset} L ${endX},${ey + offset}`;
+              }
+              if (isExternalW) {
+                  const startY = sy - (isExternalN ? offset : 0);
+                  const endY = ey + (isExternalS ? offset : 0);
+                  pathData += ` M ${sx - offset},${startY} L ${sx - offset},${endY}`;
+              }
+              if (isExternalE) {
+                  const startY = sy - (isExternalN ? offset : 0);
+                  const endY = ey + (isExternalS ? offset : 0);
+                  pathData += ` M ${ex + offset},${startY} L ${ex + offset},${endY}`;
+              }
+          }
       }
-      svgParts.push(`<path d="${pathData}" stroke="${selectedColor.hex}" stroke-width="1" fill="none" />`);
+      svgParts.push(`<path d="${pathData}" stroke="${selectedColor.hex}" stroke-width="${outlineWidth}" stroke-linecap="butt" fill="none" />`);
     }
 
     for (let y = 0; y < stitchesY; y++) {
@@ -441,8 +451,8 @@ const EditorScreen: React.FC<EditorScreenProps> = ({ imageFile }) => {
               <input id="threshold" type="range" min="0" max="255" value={threshold} onChange={e => setThreshold(Number(e.target.value))} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-sky-500" />
             </div>
             <div>
-              <label htmlFor="outlineOffset" className="block text-sm font-medium text-slate-700">Outline Offset: {outlineOffset}px</label>
-              <input id="outlineOffset" type="range" min="0" max="10" value={outlineOffset} onChange={e => setOutlineOffset(Number(e.target.value))} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-sky-500" />
+              <label htmlFor="outlineOffset" className="block text-sm font-medium text-slate-700">Outline Padding: {outlineOffset}px</label>
+              <input id="outlineOffset" type="range" min="0" max="20" value={outlineOffset} onChange={e => setOutlineOffset(Number(e.target.value))} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-sky-500" />
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">Fill Shape</label>
